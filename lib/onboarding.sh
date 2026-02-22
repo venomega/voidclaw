@@ -1,10 +1,10 @@
 #!/bin/bash
 # lib/onboarding.sh - Asistente de configuración inicial
 
-# Usar OPENCLAW_BASE_DIR si está definido
-if [[ -n "$OPENCLAW_BASE_DIR" ]]; then
-    SCRIPT_DIR="${OPENCLAW_BASE_DIR}/lib"
-    CONFIG_FILE="${OPENCLAW_BASE_DIR}/config/settings.json"
+# Usar VOIDCLAW_BASE_DIR si está definido
+if [[ -n "$VOIDCLAW_BASE_DIR" ]]; then
+    SCRIPT_DIR="${VOIDCLAW_BASE_DIR}/lib"
+    CONFIG_FILE="${VOIDCLAW_BASE_DIR}/config/settings.json"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     CONFIG_FILE="${SCRIPT_DIR}/../config/settings.json"
@@ -16,6 +16,7 @@ ONBOARD_MODEL=""
 ONBOARD_LOOP_ENABLED=""
 ONBOARD_LOOP_INTERVAL=""
 ONBOARD_LOOP_MAX_ITER=""
+ONBOARD_DAEMON_ENABLED=""
 ONBOARD_SKILLS=""
 
 # Colores
@@ -104,21 +105,61 @@ onboarding_ask_loop() {
     echo ""
     echo "OpenClaw puede ejecutar tareas automáticamente en segundo plano."
     echo ""
-    read -p "¿Deseas habilitar el loop automático? (y/n): " loop_enabled
     
-    if [[ "$loop_enabled" == "y" || "$loop_enabled" == "Y" ]]; then
-        ONBOARD_LOOP_ENABLED="true"
-        read -p "Intervalo entre tareas (segundos) [5]: " ONBOARD_LOOP_INTERVAL
-        ONBOARD_LOOP_INTERVAL="${ONBOARD_LOOP_INTERVAL:-5}"
-        
-        read -p "Máximo de iteraciones por sesión [50]: " ONBOARD_LOOP_MAX_ITER
-        ONBOARD_LOOP_MAX_ITER="${ONBOARD_LOOP_MAX_ITER:-50}"
-    else
-        ONBOARD_LOOP_ENABLED="false"
-        ONBOARD_LOOP_INTERVAL=5
-        ONBOARD_LOOP_MAX_ITER=50
+    # Detectar sistema de init disponible
+    local init_system="none"
+    if command -v systemctl &>/dev/null; then
+        if systemctl --user daemon-reexec &>/dev/null 2>&1; then
+            init_system="systemd"
+        fi
+    elif command -v sv &>/dev/null && command -v runsvdir &>/dev/null; then
+        init_system="runit"
     fi
     
+    if [[ "$init_system" != "none" ]]; then
+        echo "Sistema de init detectado: ${init_system}"
+        echo ""
+        echo "Puedes habilitar el daemon para que el loop se inicie automáticamente"
+        echo "al iniciar sesión o arrancar el sistema."
+        echo ""
+        read -p "¿Deseas habilitar el daemon automático? (y/n): " loop_enabled
+
+        if [[ "$loop_enabled" == "y" || "$loop_enabled" == "Y" ]]; then
+            ONBOARD_LOOP_ENABLED="true"
+            ONBOARD_DAEMON_ENABLED="true"
+            read -p "Intervalo entre tareas (segundos) [5]: " ONBOARD_LOOP_INTERVAL
+            ONBOARD_LOOP_INTERVAL="${ONBOARD_LOOP_INTERVAL:-5}"
+
+            read -p "Máximo de iteraciones por sesión [0=ilimitado]: " ONBOARD_LOOP_MAX_ITER
+            ONBOARD_LOOP_MAX_ITER="${ONBOARD_LOOP_MAX_ITER:-0}"
+        else
+            ONBOARD_LOOP_ENABLED="false"
+            ONBOARD_DAEMON_ENABLED="false"
+            ONBOARD_LOOP_INTERVAL=5
+            ONBOARD_LOOP_MAX_ITER=50
+        fi
+    else
+        echo -e "${YELLOW}No se detectó un sistema de init (systemd/runit)${NC}"
+        echo "El loop se podrá ejecutar manualmente con: ./voidclaw.sh --loop"
+        echo ""
+        read -p "¿Configurar loop para ejecución manual? (y/n): " loop_enabled
+
+        if [[ "$loop_enabled" == "y" || "$loop_enabled" == "Y" ]]; then
+            ONBOARD_LOOP_ENABLED="false"  # No daemon
+            ONBOARD_DAEMON_ENABLED="false"
+            read -p "Intervalo entre tareas (segundos) [5]: " ONBOARD_LOOP_INTERVAL
+            ONBOARD_LOOP_INTERVAL="${ONBOARD_LOOP_INTERVAL:-5}"
+
+            read -p "Máximo de iteraciones por sesión [50]: " ONBOARD_LOOP_MAX_ITER
+            ONBOARD_LOOP_MAX_ITER="${ONBOARD_LOOP_MAX_ITER:-50}"
+        else
+            ONBOARD_LOOP_ENABLED="false"
+            ONBOARD_DAEMON_ENABLED="false"
+            ONBOARD_LOOP_INTERVAL=5
+            ONBOARD_LOOP_MAX_ITER=50
+        fi
+    fi
+
     return 0
 }
 
@@ -151,7 +192,8 @@ onboarding_save_config() {
     local loop_interval="$4"
     local loop_max_iter="$5"
     local skills="$6"
-    
+    local daemon_enabled="$7"
+
     # Convertir skills a array JSON
     local skills_json="["
     local first=true
@@ -165,7 +207,7 @@ onboarding_save_config() {
         fi
     done
     skills_json+="]"
-    
+
     # Crear JSON de configuración
     cat > "$CONFIG_FILE" << EOF
 {
@@ -186,12 +228,13 @@ onboarding_save_config() {
   "loop": {
     "enabled": $loop_enabled,
     "interval_seconds": $loop_interval,
-    "max_iterations": $loop_max_iter
+    "max_iterations": $loop_max_iter,
+    "daemon": $daemon_enabled
   },
   "onboarding_completed": true
 }
 EOF
-    
+
     log_info "Configuración guardada exitosamente"
 }
 
@@ -211,7 +254,7 @@ onboarding_run() {
     onboarding_ask_model
     echo -e "${GREEN}✓ Modelo seleccionado: $ONBOARD_MODEL${NC}"
 
-    # Paso 3: Loop
+    # Paso 3: Loop/Daemon
     onboarding_ask_loop
     echo -e "${GREEN}✓ Loop configurado${NC}"
 
@@ -222,7 +265,15 @@ onboarding_run() {
     # Guardar
     echo ""
     echo "Guardando configuración..."
-    onboarding_save_config "$ONBOARD_API_KEY" "$ONBOARD_MODEL" "$ONBOARD_LOOP_ENABLED" "$ONBOARD_LOOP_INTERVAL" "$ONBOARD_LOOP_MAX_ITER" "$ONBOARD_SKILLS"
+    onboarding_save_config "$ONBOARD_API_KEY" "$ONBOARD_MODEL" "$ONBOARD_LOOP_ENABLED" "$ONBOARD_LOOP_INTERVAL" "$ONBOARD_LOOP_MAX_ITER" "$ONBOARD_SKILLS" "$ONBOARD_DAEMON_ENABLED"
+
+    # Si se habilitó daemon, configurarlo ahora
+    if [[ "$ONBOARD_DAEMON_ENABLED" == "true" ]]; then
+        echo ""
+        echo "Configurando daemon..."
+        source "${SCRIPT_DIR}/daemon.sh"
+        daemon_enable
+    fi
 
     echo ""
     echo -e "${GREEN}================================${NC}"
@@ -231,10 +282,16 @@ onboarding_run() {
     echo ""
     echo "Configuración guardada en: $(realpath "$CONFIG_FILE")"
     echo ""
-    echo "Ahora puedes usar OpenClaw con los siguientes comandos:"
-    echo "  ./voidclaw.sh --chat    - Modo interactivo"
-    echo "  ./voidclaw.sh --loop    - Ejecución automática"
-    echo "  ./voidclaw.sh --task    - Crear tareas"
+    echo "Comandos disponibles:"
+    if [[ "$ONBOARD_DAEMON_ENABLED" == "true" ]]; then
+        echo "  ./voidclaw.sh --daemon-status   - Ver estado del daemon"
+        echo "  ./voidclaw.sh --daemon-stop     - Detener daemon"
+        echo "  ./voidclaw.sh --loop            - Ejecución manual (sin daemon)"
+    else
+        echo "  ./voidclaw.sh --loop            - Ejecución manual del loop"
+    fi
+    echo "  ./voidclaw.sh --chat            - Modo interactivo"
+    echo "  ./voidclaw.sh --task            - Crear tareas"
     echo ""
 
     return 0

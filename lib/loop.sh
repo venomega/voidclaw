@@ -1,12 +1,12 @@
 #!/bin/bash
 # lib/loop.sh - Sistema de ejecución automática de tareas pendientes
 
-# Usar OPENCLAW_BASE_DIR si está definido
-if [[ -n "$OPENCLAW_BASE_DIR" ]]; then
-    SCRIPT_DIR="${OPENCLAW_BASE_DIR}/lib"
-    CONFIG_FILE="${OPENCLAW_BASE_DIR}/config/settings.json"
-    PENDING_FILE="${OPENCLAW_BASE_DIR}/workspace/tasks/pending.json"
-    COMPLETED_FILE="${OPENCLAW_BASE_DIR}/workspace/tasks/completed.json"
+# Usar VOIDCLAW_BASE_DIR si está definido
+if [[ -n "$VOIDCLAW_BASE_DIR" ]]; then
+    SCRIPT_DIR="${VOIDCLAW_BASE_DIR}/lib"
+    CONFIG_FILE="${VOIDCLAW_BASE_DIR}/config/settings.json"
+    PENDING_FILE="${VOIDCLAW_BASE_DIR}/workspace/tasks/pending.json"
+    COMPLETED_FILE="${VOIDCLAW_BASE_DIR}/workspace/tasks/completed.json"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     CONFIG_FILE="${SCRIPT_DIR}/../config/settings.json"
@@ -128,7 +128,7 @@ loop_execute_task() {
     log_info "Ejecutando tarea: $action (ID: $task_id)"
 
     # Ejecutar mediante tools.sh (usar ruta absoluta para evitar sobrescritura de SCRIPT_DIR)
-    local tools_lib="${OPENCLAW_BASE_DIR:-$SCRIPT_DIR}/lib/tools.sh"
+    local tools_lib="${VOIDCLAW_BASE_DIR:-$SCRIPT_DIR}/lib/tools.sh"
     source "$tools_lib"
     local result=0
     tools_execute "$action" "$params" || result=$?
@@ -206,22 +206,56 @@ loop_start() {
     local enabled
     local interval
     local max_iter
-    
+
     enabled=$(loop_get_config "enabled")
     interval=$(loop_get_config "interval_seconds")
     max_iter=$(loop_get_config "max_iterations")
-    
+
     # Valores por defecto
     enabled="${enabled:-true}"
     interval="${interval:-5}"
     max_iter="${max_iter:-50}"
-    
-    if [[ "$enabled" != "true" ]]; then
+
+    # Verificar si el daemon está habilitado
+    local daemon_enabled
+    if command -v jq &>/dev/null; then
+        daemon_enabled=$(jq -r '.loop.daemon // false' "$CONFIG_FILE" 2>/dev/null)
+    else
+        daemon_enabled=$(grep -o '"daemon"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$daemon_enabled" ]] && daemon_enabled="true" || daemon_enabled="false"
+    fi
+
+    if [[ "$daemon_enabled" == "true" ]]; then
+        echo -e "\033[0;33mEl daemon está habilitado en la configuración.\033[0m"
+        echo ""
+        echo "Opciones:"
+        echo "  1. Ver estado del daemon: ./voidclaw.sh --daemon-status"
+        echo "  2. Ejecutar loop manual temporal (sin afectar daemon)"
+        echo "  3. Salir"
+        echo ""
+        read -p "Selecciona una opción [1-3]: " option
+
+        case "$option" in
+            1)
+                source "${SCRIPT_DIR}/daemon.sh"
+                daemon_status
+                return $?
+                ;;
+            2)
+                echo "Ejecutando loop manual..."
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+    fi
+
+    if [[ "$enabled" != "true" && "$1" != "force" ]]; then
         echo "El loop automático está deshabilitado en la configuración"
         echo "Usa --loop force para ejecutar de todos modos"
         return 1
     fi
-    
+
     loop_run_cycle "$max_iter" "$interval"
 }
 

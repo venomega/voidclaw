@@ -1,9 +1,9 @@
 #!/bin/bash
 # lib/openai_api.sh - Módulo de conexión con API de OpenAI
 
-# Usar OPENCLAW_BASE_DIR si está definido, sino calcular desde SCRIPT_DIR
-if [[ -n "$OPENCLAW_BASE_DIR" ]]; then
-    CONFIG_FILE="${OPENCLAW_BASE_DIR}/config/settings.json"
+# Usar VOIDCLAW_BASE_DIR si está definido, sino calcular desde SCRIPT_DIR
+if [[ -n "$VOIDCLAW_BASE_DIR" ]]; then
+    CONFIG_FILE="${VOIDCLAW_BASE_DIR}/config/settings.json"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     CONFIG_FILE="${SCRIPT_DIR}/../config/settings.json"

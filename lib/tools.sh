@@ -1,11 +1,11 @@
 #!/bin/bash
 # lib/tools.sh - Sistema de registro y ejecución de herramientas
 
-# Usar OPENCLAW_BASE_DIR si está definido
-if [[ -n "$OPENCLAW_BASE_DIR" ]]; then
-    SCRIPT_DIR="${OPENCLAW_BASE_DIR}/lib"
-    SKILLS_DIR="${OPENCLAW_BASE_DIR}/skills"
-    CONFIG_FILE="${OPENCLAW_BASE_DIR}/config/settings.json"
+# Usar VOIDCLAW_BASE_DIR si está definido
+if [[ -n "$VOIDCLAW_BASE_DIR" ]]; then
+    SCRIPT_DIR="${VOIDCLAW_BASE_DIR}/lib"
+    SKILLS_DIR="${VOIDCLAW_BASE_DIR}/skills"
+    CONFIG_FILE="${VOIDCLAW_BASE_DIR}/config/settings.json"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     SKILLS_DIR="${SCRIPT_DIR}/../skills"

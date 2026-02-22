@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 
 # Directorio base absoluto
 BASE_DIR="$SCRIPT_DIR"
-export OPENCLAW_BASE_DIR="$BASE_DIR"
+export VOIDCLAW_BASE_DIR="$BASE_DIR"
 
 # Cargar librerías
 source "${BASE_DIR}/lib/utils.sh"
@@ -22,6 +22,7 @@ source "${BASE_DIR}/lib/openai_api.sh"
 source "${BASE_DIR}/lib/tools.sh"
 source "${BASE_DIR}/lib/onboarding.sh"
 source "${BASE_DIR}/lib/loop.sh"
+source "${BASE_DIR}/lib/daemon.sh"
 
 # Cargar skills
 load_skills() {
@@ -141,13 +142,13 @@ Analiza qué acción se necesita y crea la tarea apropiada usando crear_tarea."
     fi
 }
 
-# Mostrar estado
+# Modo status mejorado
 mode_status() {
     print_banner
     echo ""
     echo "=== Estado de OpenClaw ==="
     echo ""
-    
+
     # Configuración
     echo "Configuración:"
     if openai_is_configured; then
@@ -157,35 +158,40 @@ mode_status() {
     else
         echo "  ✗ OpenAI NO configurado"
     fi
-    
+
     if onboarding_is_complete; then
         echo "  ✓ Onboarding completado"
     else
         echo "  ✗ Onboarding pendiente"
     fi
-    
+
     echo ""
-    
+
     # Tareas
     echo "Tareas:"
     local pending_count
     pending_count=$(loop_count_pending)
     echo "  Pendientes: $pending_count"
-    
+
     local completed_file="${BASE_DIR}/workspace/tasks/completed.json"
     if [[ -f "$completed_file" ]] && command -v jq &>/dev/null; then
         local completed_count
         completed_count=$(jq '.tasks | length' "$completed_file" 2>/dev/null)
         echo "  Completadas: ${completed_count:-0}"
     fi
-    
+
     echo ""
-    
+
     # Loop
     loop_status
-    
+
     echo ""
-    
+
+    # Daemon
+    echo "Daemon:"
+    daemon_status
+    echo ""
+
     # Skills
     echo "Skills cargados:"
     for skill_file in "${BASE_DIR}/skills/"*.sh; do
@@ -195,7 +201,7 @@ mode_status() {
             echo "  - $skill_name"
         fi
     done
-    
+
     echo ""
 }
 
@@ -212,7 +218,7 @@ mode_tools() {
 main() {
     # Verificar dependencias
     check_dependencies
-    
+
     # Parsear argumentos
     case "${1:-}" in
         --onboard|-o)
@@ -233,6 +239,33 @@ main() {
                 exit 1
             fi
             loop_start
+            ;;
+        --loop-daemon)
+            # Modo daemon interno (no verificar onboarding)
+            daemon_run
+            ;;
+        --daemon-enable)
+            if ! onboarding_is_complete; then
+                echo "Primero debes completar la configuración"
+                echo "Ejecuta: $0 --onboard"
+                exit 1
+            fi
+            daemon_enable
+            ;;
+        --daemon-disable)
+            daemon_disable
+            ;;
+        --daemon-start)
+            daemon_start
+            ;;
+        --daemon-stop)
+            daemon_stop
+            ;;
+        --daemon-status)
+            daemon_status
+            ;;
+        --daemon-info)
+            daemon_info
             ;;
         --task|-t)
             if ! onboarding_is_complete; then

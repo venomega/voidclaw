@@ -98,19 +98,31 @@ print_help() {
     cat << 'EOF'
 Uso: voidclaw.sh [OPCIONES]
 
-Opciones:
+Opciones principales:
   --onboard, -o     Iniciar configuración inicial
   --chat, -c        Modo chat interactivo
-  --loop, -l        Iniciar ciclo de ejecución automática
+  --loop, -l        Ejecutar loop manualmente (una sesión)
   --task, -t        Crear tarea directa (ej: --task "copiar archivo")
   --status, -s      Mostrar estado del sistema
   --tools           Listar herramientas disponibles
+
+Opciones del Daemon:
+  --daemon-enable   Habilitar daemon (auto-inicio con el sistema)
+  --daemon-disable  Deshabilitar daemon
+  --daemon-start    Iniciar daemon manualmente
+  --daemon-stop     Detener daemon
+  --daemon-status   Ver estado del daemon
+  --daemon-info     Información del daemon
+
+Opciones generales:
   --help, -h        Mostrar esta ayuda
 
 Ejemplos:
   ./voidclaw.sh --onboard
   ./voidclaw.sh --chat
-  ./voidclaw.sh --loop
-  ./voidclaw.sh --task "crear recordatorio para mañana"
+  ./voidclaw.sh --daemon-enable    # Auto-inicio con systemd/runit
+  ./voidclaw.sh --daemon-status    # Ver estado del daemon
+  ./voidclaw.sh --loop             # Ejecución manual (sin daemon)
+  ./voidclaw.sh --task "crear recordatorio"
 EOF
 }
