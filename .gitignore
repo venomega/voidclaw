@@ -1,3 +1,5 @@
 config/settings.json
 logs/*
 workspace/tasks
+README.md
+TODO.md
