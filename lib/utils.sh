@@ -101,7 +101,8 @@ Uso: voidclaw.sh [OPCIONES]
 Opciones principales:
   --onboard, -o     Iniciar configuración inicial
   --chat, -c        Modo chat interactivo
-  --loop, -l        Ejecutar loop manualmente (una sesión)
+  --loop, -l        Ejecutar loop interactivo 
+  --loop-daemon     Ejecutar loop 
   --task, -t        Crear tarea directa (ej: --task "copiar archivo")
   --status, -s      Mostrar estado del sistema
   --tools           Listar herramientas disponibles

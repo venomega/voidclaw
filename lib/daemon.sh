@@ -764,12 +764,18 @@ daemon_info() {
 
 # Función para modo daemon (usada internamente por --loop-daemon)
 daemon_run() {
+    # Asegurar que VOIDCLAW_BASE_DIR esté definido
+    if [[ -z "$VOIDCLAW_BASE_DIR" ]]; then
+        # Obtener directorio base desde la ubicación de este script
+        export VOIDCLAW_BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    fi
+
     # Configurar logging
-    local log_file="${VOIDCLAW_BASE_DIR:-/tmp}/logs/daemon.log"
+    local log_file="${VOIDCLAW_BASE_DIR}/logs/daemon.log"
     mkdir -p "$(dirname "$log_file")"
 
     # Cargar configuración
-    source "${SCRIPT_DIR}/loop.sh"
+    source "${VOIDCLAW_BASE_DIR}/lib/loop.sh"
 
     # Obtener configuración
     local interval max_iter

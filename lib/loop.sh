@@ -164,7 +164,7 @@ loop_increment_retry() {
 loop_run_cycle() {
     # Deshabilitar exit on error para el loop
     set +e
-    
+
     local max_iterations="${1:-50}"
     local interval="${2:-5}"
     local iteration=0
@@ -175,7 +175,8 @@ loop_run_cycle() {
 
     log_info "Iniciando loop: max_iterations=$max_iterations, interval=$interval"
 
-    while [[ $iteration -lt $max_iterations ]]; do
+    # Loop infinito si max_iterations es 0
+    while [[ "$max_iterations" -eq 0 ]] || [[ $iteration -lt $max_iterations ]]; do
         local pending_count
         pending_count=$(loop_count_pending)
 
