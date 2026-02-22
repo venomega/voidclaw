@@ -213,49 +213,94 @@ openai_chat_stream() {
     local full_response=""
     local tool_calls_accumulator=""
 
-    # Hacer request con streaming y procesar línea por línea
-    # Output visual va a stderr (fd 2)
-    while IFS= read -r line; do
-        # Saltar líneas vacías
-        [[ -z "$line" ]] && continue
+    # Usar Python para procesar el stream SSE correctamente
+    # Esto evita el problema de bash con newlines en el contenido JSON
+    if command -v python3 &>/dev/null; then
+        # Usar un archivo temporal para el resultado, pero el streaming visual va directo
+        local result_file
+        result_file=$(mktemp)
+        
+        # El streaming visual (stderr) debe ir directo a la terminal
+        # stdout (resultado final) va a un archivo
+        export RESULT_FD=3
+        curl -s --no-buffer -X POST "${base_url}/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${api_key}" \
+            -H "Accept: text/event-stream" \
+            -d "$payload" 2>/dev/null | python3 -c '
+import sys
+import json
+import os
 
-        # Verificar formato SSE: data: {...}
-        if [[ "$line" == data:* ]]; then
-            local data="${line#data: }"
+result_fd = int(os.environ["RESULT_FD"])
 
-            # Verificar fin del stream
-            if [[ "$data" == "[DONE]" ]]; then
-                break
-            fi
+buffer = ""
+full_content = ""
+tool_calls = []
 
-            # Parsear JSON del chunk
-            if command -v jq &>/dev/null; then
-                # Extraer delta de contenido
-                local delta_content
-                delta_content=$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
-
-                # Extraer tool_calls si existen
-                local delta_tool_calls
-                delta_tool_calls=$(echo "$data" | jq -c '.choices[0].delta.tool_calls // empty' 2>/dev/null)
-
-                # Acumular y mostrar contenido
-                if [[ -n "$delta_content" && "$delta_content" != "null" ]]; then
-                    full_response+="$delta_content"
-                    # Imprimir token en tiempo real a stderr
-                    printf "%s" "$delta_content" >&2
-                fi
-
-                # Acumular tool_calls
-                if [[ -n "$delta_tool_calls" && "$delta_tool_calls" != "null" && "$delta_tool_calls" != "[]" ]]; then
-                    tool_calls_accumulator+="$delta_tool_calls"
-                fi
-            fi
+for chunk in sys.stdin.buffer:
+    buffer += chunk.decode("utf-8")
+    while "\n\n" in buffer:
+        event, buffer = buffer.split("\n\n", 1)
+        if event.startswith("data: "):
+            data = event[6:]
+            if data == "[DONE]":
+                if tool_calls:
+                    os.write(result_fd, ("TOOL_CALLS:" + ",".join(tool_calls)).encode())
+                else:
+                    os.write(result_fd, full_content.encode())
+                sys.exit(0)
+            try:
+                obj = json.loads(data)
+                delta = obj.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    sys.stderr.write(content)
+                    sys.stderr.flush()
+                    full_content += content
+                tc = delta.get("tool_calls", [])
+                if tc:
+                    tool_calls.extend([json.dumps(t) for t in tc])
+            except:
+                pass
+' 2>&1 3>"$result_file"
+        
+        full_response=$(cat "$result_file")
+        rm -f "$result_file"
+        
+        if [[ "$full_response" == TOOL_CALLS:* ]]; then
+            tool_calls_accumulator="${full_response#TOOL_CALLS:}"
+            full_response=""
         fi
-    done < <(curl -s --no-buffer -X POST "${base_url}/chat/completions" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${api_key}" \
-        -H "Accept: text/event-stream" \
-        -d "$payload" 2>/dev/null)
+    else
+        # Fallback: método original con bash (puede tener problemas con newlines)
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if [[ "$line" == data:* ]]; then
+                local data="${line#data: }"
+                if [[ "$data" == "[DONE]" ]]; then
+                    break
+                fi
+                if command -v jq &>/dev/null; then
+                    local delta_content
+                    delta_content=$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
+                    local delta_tool_calls
+                    delta_tool_calls=$(echo "$data" | jq -c '.choices[0].delta.tool_calls // empty' 2>/dev/null)
+                    if [[ -n "$delta_content" && "$delta_content" != "null" ]]; then
+                        full_response+="$delta_content"
+                        printf "%s" "$delta_content" >&2
+                    fi
+                    if [[ -n "$delta_tool_calls" && "$delta_tool_calls" != "null" && "$delta_tool_calls" != "[]" ]]; then
+                        tool_calls_accumulator+="$delta_tool_calls"
+                    fi
+                fi
+            fi
+        done < <(curl -s --no-buffer -X POST "${base_url}/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${api_key}" \
+            -H "Accept: text/event-stream" \
+            -d "$payload" 2>/dev/null)
+    fi
 
     # Imprimir newline final a stderr
     echo "" >&2
@@ -264,7 +309,7 @@ openai_chat_stream() {
     if [[ -n "$tool_calls_accumulator" ]]; then
         echo "TOOL_CALLS:$tool_calls_accumulator" > "$temp_file"
     else
-        echo "$full_response" > "$temp_file"
+        printf "%s" "$full_response" > "$temp_file"
     fi
 
     return 0
