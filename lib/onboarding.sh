@@ -194,6 +194,14 @@ onboarding_save_config() {
     local skills="$6"
     local daemon_enabled="$7"
 
+    # Crear directorio config si no existe
+    local config_dir
+    config_dir="$(dirname "$CONFIG_FILE")"
+    if [[ ! -d "$config_dir" ]]; then
+        mkdir -p "$config_dir"
+        log_info "Directorio de configuración creado: $config_dir"
+    fi
+
     # Convertir skills a array JSON
     local skills_json="["
     local first=true
