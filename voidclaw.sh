@@ -105,6 +105,11 @@ Responde de forma concisa en español."
 
             # Enviar resultados de vuelta
             echo ""
+        elif [[ "$response" == ERROR:* ]]; then
+            # Error de la API
+            echo ""
+            echo "ERROR: ${response#ERROR: }" >&2
+            echo ""
         else
             # Respuesta normal
             if ! openai_is_stream_enabled 2>/dev/null; then
