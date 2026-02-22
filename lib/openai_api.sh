@@ -153,3 +153,138 @@ openai_log() {
     local log_file="${SCRIPT_DIR}/../logs/openai.log"
     echo "[$(date -Iseconds)] $message" >> "$log_file"
 }
+
+# Verifica si streaming está habilitado
+openai_is_stream_enabled() {
+    local stream_config
+    if command -v jq &>/dev/null; then
+        stream_config=$(jq -r '.openai.stream // false' "$CONFIG_FILE" 2>/dev/null)
+    else
+        stream_config=$(grep -o '"stream"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null)
+        [[ -n "$stream_config" ]] && stream_config="true" || stream_config="false"
+    fi
+    [[ "$stream_config" == "true" ]]
+}
+
+# Envía mensaje a la API con streaming (Server-Sent Events)
+# Args: $1 = prompt, $2 = system_prompt, $3 = tools_json, $4 = archivo_temporal
+# Imprime streaming a stderr, guarda respuesta en archivo
+openai_chat_stream() {
+    local prompt="$1"
+    local system_prompt="${2:-You are a helpful assistant.}"
+    local tools_json="$3"
+    local temp_file="$4"
+
+    local api_key
+    local model
+    local base_url
+
+    api_key=$(openai_get_api_key)
+    model=$(openai_get_model)
+    base_url=$(openai_get_base_url)
+
+    if ! openai_is_configured; then
+        echo "ERROR: OpenAI API key not configured. Run --onboard first." >&2
+        return 1
+    fi
+
+    # Construir mensajes
+    local escaped_system_prompt
+    local escaped_prompt
+    escaped_system_prompt=$(json_escape "$system_prompt")
+    escaped_prompt=$(json_escape "$prompt")
+
+    local messages
+    messages="[{\"role\": \"system\", \"content\": \"$escaped_system_prompt\"}"
+    messages+=", {\"role\": \"user\", \"content\": \"$escaped_prompt\"}]"
+
+    # Construir payload con stream: true
+    local payload
+    payload="{\"model\": \"$model\", \"messages\": $messages, \"stream\": true"
+
+    if [[ -n "$tools_json" ]]; then
+        payload+=", \"tools\": $tools_json"
+        payload+=", \"stream_options\": {\"include_usage\": true}"
+    fi
+
+    payload+="}"
+
+    # Variable para acumular respuesta completa
+    local full_response=""
+    local tool_calls_accumulator=""
+
+    # Hacer request con streaming y procesar línea por línea
+    # Output visual va a stderr (fd 2)
+    while IFS= read -r line; do
+        # Saltar líneas vacías
+        [[ -z "$line" ]] && continue
+
+        # Verificar formato SSE: data: {...}
+        if [[ "$line" == data:* ]]; then
+            local data="${line#data: }"
+
+            # Verificar fin del stream
+            if [[ "$data" == "[DONE]" ]]; then
+                break
+            fi
+
+            # Parsear JSON del chunk
+            if command -v jq &>/dev/null; then
+                # Extraer delta de contenido
+                local delta_content
+                delta_content=$(echo "$data" | jq -r '.choices[0].delta.content // empty' 2>/dev/null)
+
+                # Extraer tool_calls si existen
+                local delta_tool_calls
+                delta_tool_calls=$(echo "$data" | jq -c '.choices[0].delta.tool_calls // empty' 2>/dev/null)
+
+                # Acumular y mostrar contenido
+                if [[ -n "$delta_content" && "$delta_content" != "null" ]]; then
+                    full_response+="$delta_content"
+                    # Imprimir token en tiempo real a stderr
+                    printf "%s" "$delta_content" >&2
+                fi
+
+                # Acumular tool_calls
+                if [[ -n "$delta_tool_calls" && "$delta_tool_calls" != "null" && "$delta_tool_calls" != "[]" ]]; then
+                    tool_calls_accumulator+="$delta_tool_calls"
+                fi
+            fi
+        fi
+    done < <(curl -s --no-buffer -X POST "${base_url}/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${api_key}" \
+        -H "Accept: text/event-stream" \
+        -d "$payload" 2>/dev/null)
+
+    # Imprimir newline final a stderr
+    echo "" >&2
+
+    # Guardar respuesta en archivo temporal
+    if [[ -n "$tool_calls_accumulator" ]]; then
+        echo "TOOL_CALLS:$tool_calls_accumulator" > "$temp_file"
+    else
+        echo "$full_response" > "$temp_file"
+    fi
+
+    return 0
+}
+
+# Wrapper que decide si usar streaming o no
+# Args: $1 = prompt, $2 = system_prompt, $3 = tools_json
+# Retorna: respuesta (usa archivo temporal para streaming)
+openai_chat_with_tools() {
+    local prompt="$1"
+    local system_prompt="${2:-You are a helpful assistant that can use tools.}"
+    local tools_json="$3"
+
+    if openai_is_stream_enabled; then
+        local temp_file
+        temp_file=$(mktemp)
+        openai_chat_stream "$prompt" "$system_prompt" "$tools_json" "$temp_file"
+        cat "$temp_file"
+        rm -f "$temp_file"
+    else
+        openai_chat "$prompt" "$system_prompt" "$tools_json"
+    fi
+}

@@ -49,48 +49,72 @@ mode_chat() {
     echo "====================="
     echo "Escribe tus instrucciones o 'salir' para terminar"
     echo ""
-    
+
+    # Verificar si streaming está habilitado
+    local stream_status="desactivado"
+    if openai_is_stream_enabled 2>/dev/null; then
+        stream_status="activado"
+    fi
+    echo "[STREAM: $stream_status]"
+    echo ""
+
     # Cargar herramientas
     load_skills
     local tools_json
     tools_json=$(tools_get_all_json)
-    
-    local system_prompt="Eres un asistente útil que puede ejecutar tareas mediante herramientas. 
+
+    local system_prompt="Eres un asistente útil que puede ejecutar tareas mediante herramientas.
 Analiza la solicitud del usuario y usa las herramientas disponibles para completarla.
 Si necesitas crear una tarea para ejecutar después, usa crear_tarea.
 Responde de forma concisa en español."
-    
+
     while true; do
         echo -n "> "
         read -r user_input
-        
+
         if [[ "$user_input" == "salir" || "$user_input" == "exit" || "$user_input" == "q" ]]; then
             echo "¡Hasta luego!"
             break
         fi
-        
+
         if [[ -z "$user_input" ]]; then
             continue
         fi
-        
+
         # Enviar a OpenAI
-        echo "Pensando..."
-        local response
-        response=$(openai_chat_with_tools "$user_input" "$system_prompt" "$tools_json")
-        
+        if ! openai_is_stream_enabled 2>/dev/null; then
+            echo "Pensando..."
+            local response
+            response=$(openai_chat_with_tools "$user_input" "$system_prompt" "$tools_json")
+        else
+            # En modo streaming, mostrar indicador y llamar directamente (sin capturar stderr)
+            echo -n "  "
+            local temp_file
+            temp_file=$(mktemp)
+            openai_chat_stream "$user_input" "$system_prompt" "$tools_json" "$temp_file"
+            local response
+            response=$(cat "$temp_file")
+            rm -f "$temp_file"
+        fi
+
         if [[ "$response" == TOOL_CALLS:* ]]; then
             # Hay tool_calls
             local tool_calls
             tool_calls="${response#TOOL_CALLS:}"
             tools_parse_and_execute "$tool_calls"
-            
+
             # Enviar resultados de vuelta
-            echo "Procesando herramientas..."
+            echo ""
         else
             # Respuesta normal
-            echo ""
-            echo "$response"
-            echo ""
+            if ! openai_is_stream_enabled 2>/dev/null; then
+                echo ""
+                echo "$response"
+                echo ""
+            else
+                # Con streaming, la respuesta ya se mostró, solo newline
+                echo ""
+            fi
         fi
     done
 }

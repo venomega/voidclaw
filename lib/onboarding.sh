@@ -208,13 +208,20 @@ onboarding_save_config() {
     done
     skills_json+="]"
 
+    # Detectar si es API Key de OpenRouter y usar URL correspondiente
+    local base_url="https://api.openai.com/v1"
+    if [[ "$api_key" == sk-or-v1-* ]]; then
+        base_url="https://openrouter.ai/api/v1"
+    fi
+
     # Crear JSON de configuración
     cat > "$CONFIG_FILE" << EOF
 {
   "openai": {
     "api_key": "$api_key",
     "model": "$model",
-    "base_url": "https://api.openai.com/v1"
+    "base_url": "$base_url",
+    "stream": true
   },
   "workspace": {
     "path": "./workspace",
