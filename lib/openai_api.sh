@@ -59,59 +59,59 @@ openai_chat() {
     local prompt="$1"
     local system_prompt="${2:-You are a helpful bash assistant.}"
     local tools_json="$3"
-    
+
     local api_key
     local model
     local base_url
-    
+
     api_key=$(openai_get_api_key)
     model=$(openai_get_model)
     base_url=$(openai_get_base_url)
-    
+
     if ! openai_is_configured; then
         echo "ERROR: OpenAI API key not configured. Run --onboard first." >&2
         return 1
     fi
-    
+
     # Construir mensajes
     local escaped_system_prompt
     local escaped_prompt
     escaped_system_prompt=$(json_escape "$system_prompt")
     escaped_prompt=$(json_escape "$prompt")
-    
+
     local messages
     messages="[{\"role\": \"system\", \"content\": \"$escaped_system_prompt\"}"
     messages+=", {\"role\": \"user\", \"content\": \"$escaped_prompt\"}]"
-    
+
     # Construir payload
     local payload
     payload="{\"model\": \"$model\", \"messages\": $messages"
-    
+
     if [[ -n "$tools_json" ]]; then
         payload+=", \"tools\": $tools_json"
         payload+=", \"tool_choice\": \"auto\""
     fi
-    
+
     payload+="}"
-    
+
     # Hacer request
     local response
     response=$(curl -s -X POST "${base_url}/chat/completions" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${api_key}" \
         -d "$payload")
-    
+
     # Extraer respuesta
     if command -v jq &>/dev/null; then
         # Primero verificar tool_calls (tienen prioridad sobre el contenido)
         local tool_calls
         tool_calls=$(echo "$response" | jq -c '.choices[0].message.tool_calls // empty' 2>/dev/null)
-        
+
         if [[ -n "$tool_calls" && "$tool_calls" != "null" && "$tool_calls" != "[]" ]]; then
             echo "TOOL_CALLS:$tool_calls"
             return 0
         fi
-        
+
         # Si no hay tool_calls, verificar contenido
         local content
         content=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
@@ -143,7 +143,7 @@ openai_chat_with_tools() {
     local prompt="$1"
     local system_prompt="${2:-You are a helpful assistant that can use tools to complete tasks.}"
     local tools_json="$3"
-    
+
     openai_chat "$prompt" "$system_prompt" "$tools_json"
 }
 
@@ -216,13 +216,12 @@ openai_chat_stream() {
     # Usar Python para procesar el stream SSE correctamente
     # Esto evita el problema de bash con newlines en el contenido JSON
     if command -v python3 &>/dev/null; then
-        # Usar un archivo temporal para el resultado, pero el streaming visual va directo
         local result_file
         result_file=$(mktemp)
-        
-        # El streaming visual (stderr) debe ir directo a la terminal
-        # stdout (resultado final) va a un archivo
+
         export RESULT_FD=3
+
+        # Streaming con manejo de errores
         curl -s --no-buffer -X POST "${base_url}/chat/completions" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${api_key}" \
@@ -261,13 +260,13 @@ for chunk in sys.stdin.buffer:
                 tc = delta.get("tool_calls", [])
                 if tc:
                     tool_calls.extend([json.dumps(t) for t in tc])
-            except:
+            except json.JSONDecodeError:
                 pass
 ' 2>&1 3>"$result_file"
-        
+
         full_response=$(cat "$result_file")
         rm -f "$result_file"
-        
+
         if [[ "$full_response" == TOOL_CALLS:* ]]; then
             tool_calls_accumulator="${full_response#TOOL_CALLS:}"
             full_response=""
@@ -314,7 +313,6 @@ for chunk in sys.stdin.buffer:
 
     return 0
 }
-
 # Wrapper que decide si usar streaming o no
 # Args: $1 = prompt, $2 = system_prompt, $3 = tools_json
 # Retorna: respuesta (usa archivo temporal para streaming)
